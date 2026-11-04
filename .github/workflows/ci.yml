@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: fab
+          POSTGRES_PASSWORD: fab
+          POSTGRES_DB: fab
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U fab" --health-interval 5s
+          --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Unit + validation tests (real SimPy)
+        run: pytest -q
+      - name: Simulation run logged to PostgreSQL
+        run: python -m fabsim.run --db postgresql://fab:fab@localhost:5432/fab --days 120
+      - name: Query metric views
+        env:
+          PGPASSWORD: fab
+        run: |
+          psql -h localhost -U fab -d fab -c "SELECT tool_group, ROUND(avg_queue_h::numeric,2) AS avg_queue_h FROM v_queue_time_by_group ORDER BY 2 DESC LIMIT 5"
+          psql -h localhost -U fab -d fab -c "SELECT tool_group, ROUND(AVG(prod_frac)::numeric,3) AS util FROM v_tool_utilization GROUP BY 1 ORDER BY 2 DESC LIMIT 5"

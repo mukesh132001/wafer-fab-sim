@@ -1,0 +1,13 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: fab
+      POSTGRES_PASSWORD: fab
+      POSTGRES_DB: fab
+    ports:
+      - "5432:5432"
+    volumes:
+      - fabdata:/var/lib/postgresql/data
+volumes:
+  fabdata:
