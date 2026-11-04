@@ -1,0 +1,80 @@
+name: Run simulation
+
+# Actions tab -> "Run simulation" -> Run workflow. Results appear on the run page.
+on:
+  workflow_dispatch:
+    inputs:
+      rule:
+        description: Dispatch rule
+        type: choice
+        options: [FIFO, SPT, EDD, CR, LEAST_SLACK]
+        default: FIFO
+      release:
+        description: Release policy
+        type: choice
+        options: [constant, conwip, dbr]
+        default: constant
+      arrivals:
+        description: Order arrivals
+        type: choice
+        options: [constant, poisson]
+        default: constant
+      days:
+        description: Simulated days (incl. 30-day warm-up)
+        default: "180"
+      seed:
+        description: Random seed
+        default: "1"
+      tools:
+        description: 'Tool count changes, e.g. LITHO=2 (blank = none)'
+        default: ""
+      incident:
+        description: 'Long outage TOOL:START_DAY:END_DAY, e.g. LITHO_02:80:94 (blank = none)'
+        default: ""
+      policy_study:
+        description: Also run the full 8-policy study (30 reps, ~3 min)
+        type: boolean
+        default: false
+
+jobs:
+  simulate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt matplotlib
+      - name: Simulate
+        env:
+          RULE: ${{ inputs.rule }}
+          RELEASE: ${{ inputs.release }}
+          ARRIVALS: ${{ inputs.arrivals }}
+          DAYS: ${{ inputs.days }}
+          SEED: ${{ inputs.seed }}
+          TOOLS: ${{ inputs.tools }}
+          INCIDENT: ${{ inputs.incident }}
+        run: |
+          ARGS=(--rule "$RULE" --release "$RELEASE" --arrivals "$ARRIVALS" --days "$DAYS" --seed "$SEED"
+                --db sqlite:///fab.db --summary-md summary.md)
+          [ -n "$TOOLS" ] && ARGS+=(--tools "$TOOLS")
+          [ -n "$INCIDENT" ] && ARGS+=(--incident "$INCIDENT")
+          [ "$RELEASE" = conwip ] && ARGS+=(--wip-cap 34)
+          [ "$RELEASE" = dbr ] && ARGS+=(--drum-buffer 10)
+          python -m fabsim.run "${ARGS[@]}"
+          cat summary.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Policy study
+        if: ${{ inputs.policy_study }}
+        run: |
+          python -m fabsim.experiment --reps 30 --out results/dispatch_study
+          cat results/dispatch_study/report.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Export dashboard for download
+        run: python -m fabsim.export_static --db sqlite:///fab.db --out site
+      - uses: actions/upload-artifact@v4
+        with:
+          name: simulation-results
+          path: |
+            fab.db
+            summary.md
+            site/
+            results/

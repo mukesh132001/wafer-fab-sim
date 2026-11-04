@@ -6,6 +6,10 @@ throughput, WIP and on-time delivery. Results are backed by paired statistics, a
 simulator is validated against queueing theory. It also includes a root-cause case
 study, a line dashboard and an LLM agent that runs what-if studies.
 
+**Live dashboard:** https://mukesh132001.github.io/wafer-fab-sim/ (rebuilt by GitHub Actions on every push)
+**Run it yourself in the browser:** Actions tab → **Run simulation** → *Run workflow* (choose dispatch
+rule, release policy, tool changes or an outage; results appear on the run page)
+
 ![Dashboard](docs/dashboard.png)
 
 ## Headline results
@@ -94,7 +98,12 @@ python -m fabsim.api --db sqlite:///fab.db   # dashboard at http://localhost:800
 pytest -q
 ```
 
+What-if flags for `fabsim.run`: `--rule CR`, `--release conwip|dbr`, `--arrivals poisson`,
+`--wip-cap 34`, `--drum-buffer 10`, `--tools LITHO=2`, `--incident LITHO_02:80:94`.
+
 PostgreSQL: `docker compose up -d`, then use `--db postgresql://fab:fab@localhost:5432/fab`.
+
+Static dashboard export (what GitHub Pages serves): `python -m fabsim.export_static --db sqlite:///fab.db --out site`
 
 ### AI agent
 

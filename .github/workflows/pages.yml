@@ -1,0 +1,51 @@
+name: Publish dashboard
+
+# Runs a set of simulations on every push to main and publishes the dashboard
+# to GitHub Pages:  https://<user>.github.io/wafer-fab-sim/
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Run showcase simulations
+        run: |
+          DB=sqlite:///fab.db
+          python -m fabsim.run --db $DB --days 180 --scenario "LITHO_02 outage, recovered (expedite + CR + DBR)" --rule CR --release dbr --drum-buffer 10 --incident LITHO_02:80:85
+          python -m fabsim.run --db $DB --days 180 --scenario "LITHO_02 14-day outage (as-is)" --incident LITHO_02:80:94
+          python -m fabsim.run --db $DB --days 180 --scenario "Variable demand, CONWIP" --arrivals poisson --release conwip --wip-cap 34
+          python -m fabsim.run --db $DB --days 180 --scenario "Variable demand, FIFO push" --arrivals poisson
+          python -m fabsim.run --db $DB --days 180 --scenario "Critical ratio" --rule CR
+          python -m fabsim.run --db $DB --days 180 --scenario "Baseline (FIFO)"
+      - name: Export static dashboard
+        run: python -m fabsim.export_static --db sqlite:///fab.db --out site
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
