@@ -1,11 +1,12 @@
-"""Load the fab definition (YAML) into typed objects + static capacity analysis."""
+"""Load the fab definition (TOML) into typed objects + static capacity analysis."""
 from __future__ import annotations
 
 import copy
 from dataclasses import dataclass, field
 from pathlib import Path
 
-import yaml
+import json
+import tomllib
 
 
 @dataclass(frozen=True)
@@ -88,8 +89,17 @@ def parse_config(raw: dict) -> FabConfig:
 
 
 def load_config(path: str | Path) -> FabConfig:
-    with open(path) as f:
-        return parse_config(yaml.safe_load(f))
+    """Load a fab definition from .toml (built-in tomllib), .json, or .yaml (needs PyYAML)."""
+    path = Path(path)
+    if path.suffix == ".toml":
+        with open(path, "rb") as f:
+            return parse_config(tomllib.load(f))
+    if path.suffix == ".json":
+        return parse_config(json.loads(path.read_text()))
+    if path.suffix in (".yaml", ".yml"):
+        import yaml  # optional dependency
+        return parse_config(yaml.safe_load(path.read_text()))
+    raise ValueError(f"Unsupported config format: {path.suffix}")
 
 
 def capacity_table(cfg: FabConfig) -> list[dict]:

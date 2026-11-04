@@ -20,7 +20,7 @@ PostgreSQL for SQL-based analysis.
 | Yield | Per-wafer scrap at ETCH, CMP, PROBE → line yield |
 | Release | One lot every 2.4 h (10 lots / 250 wafers per day) |
 
-Everything lives in [`config/fab_default.yaml`](config/fab_default.yaml), so what-if
+Everything lives in [`config/fab_default.toml`](config/fab_default.toml), so what-if
 studies are config changes.
 
 ## Quick start
@@ -72,8 +72,8 @@ Bottleneck     : LITHO
 ## Architecture
 
 ```
-config/fab_default.yaml   fab definition (tool groups, modules, route, release)
-fabsim/config.py          YAML -> typed specs, capacity analysis, what-if overrides
+config/fab_default.toml   fab definition (tool groups, modules, route, release)
+fabsim/config.py          TOML -> typed specs, capacity analysis, what-if overrides
 fabsim/model.py           SimPy model: Lot, ToolGroup, Tool (+ failure process), Fab
 fabsim/dispatch.py        dispatch rules (priority functions) + batch formation
 fabsim/logger.py          buffered event logging -> PostgreSQL or SQLite

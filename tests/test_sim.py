@@ -9,7 +9,7 @@ from fabsim.run import run_once
 from fabsim.model import Fab
 from fabsim.logger import DBLogger
 
-CFG = Path(__file__).resolve().parent.parent / "config" / "fab_default.yaml"
+CFG = Path(__file__).resolve().parent.parent / "config" / "fab_default.toml"
 
 
 @pytest.fixture(scope="module")

@@ -17,7 +17,7 @@ from .logger import DBLogger
 from .metrics import print_summary, summarize
 from .model import Fab
 
-DEFAULT_CFG = Path(__file__).resolve().parent.parent / "config" / "fab_default.yaml"
+DEFAULT_CFG = Path(__file__).resolve().parent.parent / "config" / "fab_default.toml"
 
 
 def run_once(cfg, seed=1, rule="FIFO", days=120, warmup_days=30, db=None, scenario="baseline"):
