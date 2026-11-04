@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fab Line Dashboard</title>
+<style>
+:root {
+  color-scheme: light;
+  --surface-0: #f4f4f2; --surface-1: #fcfcfb; --border: #e3e2de;
+  --text-primary: #0b0b0b; --text-secondary: #52514e; --text-muted: #8a8984;
+  --grid: #ebeae6; --series-1: #2a78d6; --series-2: #eb6834; --baseline: #9a9993;
+  --seq-0: #eef4fd; --seq-1: #cde2fb; --seq-2: #9ec5f4; --seq-3: #6da7ec; --seq-4: #3987e5;
+  --seq-5: #256abf; --seq-6: #184f95; --seq-7: #0d366b;
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+    --surface-0: #111110; --surface-1: #1a1a19; --border: #2c2c2a;
+    --text-primary: #f0efec; --text-secondary: #c3c2b7; --text-muted: #8f8e86;
+    --grid: #2a2a28; --series-1: #3987e5; --series-2: #d95926; --baseline: #77766f;
+    --seq-0: #1d2633; --seq-1: #0d366b; --seq-2: #104281; --seq-3: #184f95; --seq-4: #256abf;
+    --seq-5: #3987e5; --seq-6: #6da7ec; --seq-7: #b7d3f6;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --surface-0: #111110; --surface-1: #1a1a19; --border: #2c2c2a;
+  --text-primary: #f0efec; --text-secondary: #c3c2b7; --text-muted: #8f8e86;
+  --grid: #2a2a28; --series-1: #3987e5; --series-2: #d95926; --baseline: #77766f;
+  --seq-0: #1d2633; --seq-1: #0d366b; --seq-2: #104281; --seq-3: #184f95; --seq-4: #256abf;
+  --seq-5: #3987e5; --seq-6: #6da7ec; --seq-7: #b7d3f6;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--surface-0); color: var(--text-primary);
+       font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+header label { display: flex; align-items: center; gap: 6px; min-width: 0; flex: 0 1 460px; }
+html, body { overflow-x: hidden; }
+header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between;
+         padding: 16px 24px; border-bottom: 1px solid var(--border); background: var(--surface-1); }
+h1 { font-size: 18px; margin: 0; font-weight: 650; }
+h2 { font-size: 14px; margin: 0 0 2px; font-weight: 600; }
+.sub { color: var(--text-secondary); font-size: 12px; margin: 0 0 10px; }
+select { min-width: 0; width: 100%; font: inherit; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border);
+         background: var(--surface-1); color: var(--text-primary); max-width: 100%; }
+main { padding: 20px 24px 40px; display: grid; gap: 16px; grid-template-columns: repeat(12, 1fr); }
+.card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 16px;
+        grid-column: span 12; min-width: 0; }
+.half { grid-column: span 6; }
+@media (max-width: 900px) { .half { grid-column: span 12; } main { padding: 16px; } header { padding: 12px 16px; } }
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px; }
+#study { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 16px; }
+.kpi .v { font-size: 24px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.kpi .l { color: var(--text-secondary); font-size: 12px; }
+svg { display: block; width: 100%; height: auto; overflow: visible; }
+svg text { fill: var(--text-secondary); font-size: 11px; font-variant-numeric: tabular-nums; }
+.axis line, .grid line { stroke: var(--grid); }
+.legend { display: flex; gap: 14px; align-items: center; font-size: 12px; color: var(--text-secondary); margin: 4px 0 8px; flex-wrap: wrap; }
+.sw { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+#tip { position: fixed; pointer-events: none; background: var(--surface-1); color: var(--text-primary);
+       border: 1px solid var(--border); border-radius: 8px; padding: 6px 9px; font-size: 12px;
+       box-shadow: 0 4px 14px rgba(0,0,0,.12); display: none; z-index: 10; white-space: nowrap; }
+.empty { color: var(--text-muted); padding: 24px 0; }
+.mark:hover { opacity: .8; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Wafer Fab Line Dashboard</h1>
+  <label>Run&nbsp; <select id="run"></select></label>
+</header>
+<main>
+  <section class="card"><div class="kpis" id="kpis"></div></section>
+  <section class="card half"><h2>Weekly mean cycle time</h2><p class="sub">Hours from fab release to wafer out, by completion week</p><div id="weekly"></div></section>
+  <section class="card half"><h2>Tool group utilization</h2><p class="sub">Share of post-warm-up time producing vs down</p>
+    <div class="legend"><span><i class="sw" style="background:var(--series-1)"></i>Producing</span><span><i class="sw" style="background:var(--series-2)"></i>Down</span></div>
+    <div id="util"></div></section>
+  <section class="card"><h2>Bottleneck heatmap</h2><p class="sub">Average queue time (h) per tool group per week. Rows sorted by worst week.</p>
+    <div class="legend" id="heatlegend" style="gap:3px"></div><div id="heat"></div></section>
+  <section class="card half"><h2>WIP by tool group</h2><p class="sub">Average lots at each group (queued + in process)</p><div id="wip"></div></section>
+  <section class="card half"><h2>Queue time along the route</h2><p class="sub">Average wait at each of the route steps</p><div id="steps"></div></section>
+  <section class="card"><h2>Dispatch policy study</h2><p class="sub" id="studysub">Dot = mean, line = 95% confidence interval across replications; gray = FIFO baseline. Hover for the paired test vs FIFO.</p>
+    <div id="study"><div id="studyct"></div><div id="studyot"></div></div></section>
+</main>
+<div id="tip"></div>
+<script>
+const $ = s => document.querySelector(s);
+const NS = "http://www.w3.org/2000/svg";
+const tip = $("#tip");
+const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const fmt = (v, d = 1) => v == null || isNaN(v) ? "–" : Number(v).toFixed(d);
+async function api(p) { const r = await fetch(p); return r.json(); }
+
+function el(tag, attrs = {}, parent) {
+  const e = document.createElementNS(NS, tag);
+  for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+  if (parent) parent.appendChild(e);
+  return e;
+}
+function svgBox(container, w, h) {
+  container.innerHTML = "";
+  return el("svg", { viewBox: `0 0 ${w} ${h}`, role: "img" }, container);
+}
+function hover(node, html) {
+  node.addEventListener("mousemove", ev => { tip.innerHTML = html; tip.style.display = "block";
+    tip.style.left = Math.min(ev.clientX + 12, innerWidth - tip.offsetWidth - 8) + "px"; tip.style.top = (ev.clientY + 12) + "px"; });
+  node.addEventListener("mouseleave", () => tip.style.display = "none");
+}
+function niceMax(v) { const p = 10 ** Math.floor(Math.log10(v || 1)); return Math.ceil(v / p) * p; }
+// rounded-top bar path (4px radius at the data end, square at the baseline)
+function barV(x, y, w, h, r = 4) { r = Math.min(r, w / 2, h); return `M${x},${y + h}V${y + r}Q${x},${y} ${x + r},${y}H${x + w - r}Q${x + w},${y} ${x + w},${y + r}V${y + h}Z`; }
+function barH(x, y, w, h, r = 4) { r = Math.min(r, h / 2, w); return `M${x},${y}H${x + w - r}Q${x + w},${y} ${x + w},${y + r}V${y + h - r}Q${x + w},${y + h} ${x + w - r},${y + h}H${x}Z`; }
+
+function lineChart(c, pts, { yLabel = "", xFmt = x => x }) {
+  if (!pts.length) { c.innerHTML = '<p class="empty">No data</p>'; return; }
+  const W = 560, H = 240, m = { l: 44, r: 12, t: 10, b: 28 };
+  const s = svgBox(c, W, H);
+  const xs = pts.map(p => p.x), ymax = niceMax(Math.max(...pts.map(p => p.y)) * 1.05);
+  const X = x => m.l + (x - xs[0]) / Math.max(1, xs.at(-1) - xs[0]) * (W - m.l - m.r);
+  const Y = y => H - m.b - y / ymax * (H - m.t - m.b);
+  for (let i = 0; i <= 4; i++) { const v = ymax * i / 4;
+    el("line", { x1: m.l, x2: W - m.r, y1: Y(v), y2: Y(v), stroke: css("--grid") }, s);
+    el("text", { x: m.l - 6, y: Y(v) + 4, "text-anchor": "end" }, s).textContent = fmt(v, 0); }
+  const step = Math.ceil(pts.length / 8);
+  pts.forEach((p, i) => { if (i % step === 0) el("text", { x: X(p.x), y: H - 8, "text-anchor": "middle" }, s).textContent = xFmt(p.x); });
+  el("path", { d: pts.map((p, i) => `${i ? "L" : "M"}${X(p.x)},${Y(p.y)}`).join(""), fill: "none",
+               stroke: css("--series-1"), "stroke-width": 2, "stroke-linejoin": "round" }, s);
+  const cross = el("line", { y1: m.t, y2: H - m.b, stroke: css("--text-muted"), "stroke-dasharray": "3 3", visibility: "hidden" }, s);
+  const dot = el("circle", { r: 4.5, fill: css("--series-1"), stroke: css("--surface-1"), "stroke-width": 2, visibility: "hidden" }, s);
+  const hit = el("rect", { x: m.l, y: m.t, width: W - m.l - m.r, height: H - m.t - m.b, fill: "transparent" }, s);
+  hit.addEventListener("mousemove", ev => {
+    const b = s.getBoundingClientRect(), vx = (ev.clientX - b.left) / b.width * W;
+    const p = pts.reduce((a, q) => Math.abs(X(q.x) - vx) < Math.abs(X(a.x) - vx) ? q : a);
+    cross.setAttribute("x1", X(p.x)); cross.setAttribute("x2", X(p.x)); cross.setAttribute("visibility", "visible");
+    dot.setAttribute("cx", X(p.x)); dot.setAttribute("cy", Y(p.y)); dot.setAttribute("visibility", "visible");
+    tip.innerHTML = p.tip; tip.style.display = "block";
+    tip.style.left = Math.min(ev.clientX + 12, innerWidth - tip.offsetWidth - 8) + "px"; tip.style.top = (ev.clientY + 12) + "px";
+  });
+  hit.addEventListener("mouseleave", () => { tip.style.display = "none"; cross.setAttribute("visibility", "hidden"); dot.setAttribute("visibility", "hidden"); });
+}
+
+function hBars(c, rows, { max = null, segs, valueFmt, labelW = 80, ci = null, colorOf = null }) {
+  if (!rows.length) { c.innerHTML = '<p class="empty">No data</p>'; return; }
+  const W = 560, rowH = 24, H = rows.length * rowH + 8, x0 = labelW, x1 = W - 56;
+  const s = svgBox(c, W, H);
+  const lo = max && max.lo != null ? max.lo : 0;
+  const hi = max && max.hi != null ? max.hi : Math.max(...rows.map(r => segs.reduce((a, k) => a + r[k], 0) + (ci ? r[ci] : 0)));
+  const X = v => x0 + (v - lo) / (hi - lo) * (x1 - x0);
+  rows.forEach((r, i) => {
+    const y = i * rowH + 4, h = rowH - 8;
+    el("text", { x: x0 - 8, y: y + h / 2 + 4, "text-anchor": "end" }, s).textContent = r.label;
+    let acc = lo;
+    segs.forEach((k, j) => {
+      const a = X(acc), b = X(acc + r[k]), w = Math.max(0, b - a - (j < segs.length - 1 ? 2 : 0));
+      const color = colorOf ? colorOf(r) : css(j === 0 ? "--series-1" : "--series-2");
+      const p = el("path", { d: j === segs.length - 1 ? barH(a, y, Math.max(w, 0.5), h) : `M${a},${y}h${w}v${h}h${-w}Z`,
+                             fill: color, class: "mark" }, s);
+      hover(p, r.tip);
+      acc += r[k];
+    });
+    if (ci) { const m = X(acc), e1 = X(acc - r[ci]), e2 = X(acc + r[ci]);
+      el("line", { x1: e1, x2: e2, y1: y + h / 2, y2: y + h / 2, stroke: css("--text-primary"), "stroke-width": 1.5 }, s);
+      [e1, e2].forEach(e => el("line", { x1: e, x2: e, y1: y + 4, y2: y + h - 4, stroke: css("--text-primary"), "stroke-width": 1.5 }, s)); }
+    el("text", { x: X(acc + (ci ? r[ci] : 0)) + 6, y: y + h / 2 + 4 }, s).textContent = valueFmt(r);
+  });
+}
+
+function heatmap(c, rows) {
+  if (!rows.length) { c.innerHTML = '<p class="empty">No data</p>'; return; }
+  const groups = [...new Set(rows.map(r => r.tool_group))];
+  const weeks = [...new Set(rows.map(r => r.week))].sort((a, b) => a - b);
+  const vmax = Math.max(...rows.map(r => r.avg_queue_h));
+  const steps = [0, 1, 2, 3, 4, 5, 6, 7].map(i => css(`--seq-${i}`));
+  const W = 1120, cellH = 22, lw = 70, H = groups.length * cellH + 34, cw = (W - lw - 8) / weeks.length;
+  const s = svgBox(c, W, H);
+  const order = groups.sort((a, b) => Math.max(...rows.filter(r => r.tool_group === b).map(r => r.avg_queue_h)) -
+                                     Math.max(...rows.filter(r => r.tool_group === a).map(r => r.avg_queue_h)));
+  order.forEach((g, i) => el("text", { x: lw - 8, y: i * cellH + cellH / 2 + 4, "text-anchor": "end" }, s).textContent = g);
+  rows.forEach(r => {
+    const i = order.indexOf(r.tool_group), j = weeks.indexOf(r.week);
+    const k = Math.min(7, Math.floor(Math.sqrt(r.avg_queue_h / (vmax || 1)) * 7.999));
+    const rect = el("rect", { x: lw + j * cw + 1, y: i * cellH + 1, width: Math.max(1, cw - 2), height: cellH - 2, rx: 3,
+                              fill: steps[k], class: "mark" }, s);
+    hover(rect, `<b>${r.tool_group}</b>, week ${r.week}<br>avg queue ${fmt(r.avg_queue_h, 2)} h · ${r.moves} moves`);
+  });
+  $("#heatlegend").innerHTML = `<span>short wait</span>` + steps.map(c => `<i class="sw" style="background:${c};margin:0"></i>`).join("") +
+    `<span>long wait (max ${fmt(vmax, 1)} h)</span>`;
+  const st = Math.ceil(weeks.length / 12);
+  weeks.forEach((w, j) => { if (j % st === 0) el("text", { x: lw + j * cw + cw / 2, y: H - 12, "text-anchor": "middle" }, s).textContent = "wk " + w; });
+}
+
+function columnChart(c, rows) {
+  const W = 560, H = 220, m = { l: 36, r: 8, t: 10, b: 26 };
+  const s = svgBox(c, W, H);
+  const ymax = niceMax(Math.max(...rows.map(r => r.y)) * 1.05), bw = (W - m.l - m.r) / rows.length;
+  const Y = v => H - m.b - v / ymax * (H - m.t - m.b);
+  for (let i = 0; i <= 4; i++) { const v = ymax * i / 4;
+    el("line", { x1: m.l, x2: W - m.r, y1: Y(v), y2: Y(v), stroke: css("--grid") }, s);
+    el("text", { x: m.l - 6, y: Y(v) + 4, "text-anchor": "end" }, s).textContent = fmt(v, v < 10 ? 1 : 0); }
+  rows.forEach((r, i) => {
+    const x = m.l + i * bw + 1, h = Math.max(0.5, H - m.b - Y(r.y));
+    const p = el("path", { d: barV(x, Y(r.y), Math.max(1, bw - 2), h, 3), fill: css("--series-1"), class: "mark" }, s);
+    hover(p, r.tip);
+    if (i % 4 === 0) el("text", { x: x + bw / 2, y: H - 8, "text-anchor": "middle" }, s).textContent = r.x;
+  });
+}
+
+// Dot + 95% CI whisker plot: honest for means whose axis does not start at zero.
+function dotCI(c, rows, { d = 1 }) {
+  const W = 560, rowH = 26, lw = 104, m = { r: 64, b: 24 }, H = rows.length * rowH + m.b;
+  const s = svgBox(c, W, H);
+  const lo0 = Math.min(...rows.map(r => r.v - r.ci)), hi0 = Math.max(...rows.map(r => r.v + r.ci));
+  const pad = (hi0 - lo0) * 0.08, lo = lo0 - pad, hi = hi0 + pad;
+  const X = v => lw + (v - lo) / (hi - lo) * (W - lw - m.r);
+  const ticks = 5;
+  for (let i = 0; i <= ticks; i++) { const v = lo + (hi - lo) * i / ticks;
+    el("line", { x1: X(v), x2: X(v), y1: 0, y2: H - m.b, stroke: css("--grid") }, s);
+    el("text", { x: X(v), y: H - 6, "text-anchor": "middle" }, s).textContent = fmt(v, 0); }
+  rows.forEach((r, i) => {
+    const y = i * rowH + rowH / 2, color = r.label === "FIFO" ? css("--baseline") : css("--series-1");
+    el("text", { x: lw - 10, y: y + 4, "text-anchor": "end" }, s).textContent = r.label;
+    el("line", { x1: X(r.v - r.ci), x2: X(r.v + r.ci), y1: y, y2: y, stroke: color, "stroke-width": 2, "stroke-linecap": "round" }, s);
+    const dot = el("circle", { cx: X(r.v), cy: y, r: 5, fill: color, stroke: css("--surface-1"), "stroke-width": 2, class: "mark" }, s);
+    const hit = el("rect", { x: lw, y: y - rowH / 2, width: W - lw, height: rowH, fill: "transparent" }, s);
+    hover(hit, r.tip);
+    el("text", { x: X(r.v + r.ci) + 8, y: y + 4 }, s).textContent = fmt(r.v, d);
+  });
+}
+
+async function loadRun(id) {
+  const [k, weekly, util, heat, wip, steps] = await Promise.all(["kpis", "weekly", "utilization", "heatmap", "wip", "steps"]
+    .map(e => api(`/api/${e}?run=${encodeURIComponent(id)}`)));
+  const ll = k.littles_law || {};
+  $("#kpis").innerHTML = [
+    ["Throughput", fmt(k.throughput_wafers_per_day), "wafers / day"],
+    ["Mean cycle time", fmt(k.cycle_time_mean_h), `h · x-factor ${fmt(k.x_factor, 2)}`],
+    ["P90 cycle time", fmt(k.cycle_time_p90_h), "h"],
+    ["On-time delivery", fmt(k.on_time_pct), "%"],
+    ["Avg WIP", fmt(k.avg_wip_lots), "lots"],
+    ["Line yield", fmt(100 * k.line_yield, 2), "%"],
+    ["Little's Law check", fmt(ll.rel_error_pct, 2), "% error (WIP vs TH×CT)"],
+    ["Bottleneck", k.bottleneck || "–", "highest utilization"],
+  ].map(([l, v, u]) => `<div class="kpi"><div class="l">${l}</div><div class="v">${v}</div><div class="l">${u}</div></div>`).join("");
+  lineChart($("#weekly"), weekly.map(w => ({ x: w.week, y: w.mean_ct_h,
+    tip: `<b>Week ${w.week}</b><br>mean CT ${fmt(w.mean_ct_h)} h<br>${w.lots_out} lots out · on-time ${fmt(100 * w.on_time_frac, 0)}%` })),
+    { xFmt: x => "wk " + x });
+  hBars($("#util"), util.map(u => ({ label: u.tool_group, prod: u.prod, down: u.down,
+    tip: `<b>${u.tool_group}</b><br>producing ${fmt(100 * u.prod)}%<br>down ${fmt(100 * u.down)}%` })),
+    { segs: ["prod", "down"], max: { hi: 1 }, valueFmt: r => `${fmt(100 * (r.prod + r.down), 0)}%` });
+  heatmap($("#heat"), heat);
+  hBars($("#wip"), wip.map(w => ({ label: w.tool_group, v: w.avg_queued + w.avg_in_process,
+    tip: `<b>${w.tool_group}</b><br>queued ${fmt(w.avg_queued, 2)} · in process ${fmt(w.avg_in_process, 2)}<br>max ${w.max_wip} lots` })),
+    { segs: ["v"], valueFmt: r => fmt(r.v) });
+  columnChart($("#steps"), steps.map(s => ({ x: s.step_idx + 1, y: s.avg_queue_h,
+    tip: `<b>Step ${s.step_idx + 1}: ${s.recipe}</b> (${s.tool_group})<br>queue ${fmt(s.avg_queue_h, 2)} h · process ${fmt(s.avg_process_h, 2)} h` })));
+}
+
+async function loadStudy() {
+  const rows = await api("/api/study");
+  if (!Array.isArray(rows)) { $("#studysub").textContent = rows.error; return; }
+  const pick = (metric, el_, label, d) => {
+    const r = rows.filter(x => x.metric === metric).map(x => ({ label: x.policy, v: +x.mean, ci: +x.ci95_half_width,
+      tip: `<b>${x.policy}</b><br>${label}: ${fmt(+x.mean, d)} ± ${fmt(+x.ci95_half_width, d)}` +
+           (x.policy === "FIFO" ? "<br>baseline" : `<br>vs FIFO ${(+x.pct_vs_FIFO >= 0 ? "+" : "") + fmt(+x.pct_vs_FIFO)}% · p(Holm) ${(+x.p_holm).toExponential(1)}`) }));
+    const c = $(el_); c.innerHTML = `<h2 style="font-size:13px">${label}</h2>`; const box = document.createElement("div"); c.appendChild(box);
+    dotCI(box, r, { d });
+  };
+  pick("cycle_time_mean_h", "#studyct", "Mean cycle time (h)", 1);
+  pick("on_time_pct", "#studyot", "On-time delivery (%)", 1);
+}
+
+(async () => {
+  const runs = await api("/api/runs");
+  const sel = $("#run");
+  if (!runs.length) { $("#kpis").innerHTML = '<p class="empty">No runs yet: python -m fabsim.run --db sqlite:///fab.db</p>'; }
+  sel.innerHTML = runs.map(r => `<option value="${r.run_id}">${r.scenario} · ${r.dispatch_rule}+${r.release_policy} · seed ${r.seed} · ${r.created_at.slice(0, 16)}</option>`).join("");
+  sel.onchange = () => loadRun(sel.value);
+  if (runs.length) loadRun(runs[0].run_id);
+  loadStudy();
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { if (sel.value) loadRun(sel.value); loadStudy(); });
+})();
+</script>
+</body>
+</html>

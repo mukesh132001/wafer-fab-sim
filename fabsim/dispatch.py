@@ -2,7 +2,7 @@
 
 A rule is a function priority(entry, now) -> sort key (lower = served first).
 Batch formation is shared logic, so every rule automatically works on batch
-tools too. Week 2: add SPT, critical ratio, least slack here and register them.
+tools too. Ties are broken by arrival time, then lot id (deterministic).
 """
 from __future__ import annotations
 
@@ -29,9 +29,35 @@ def fifo(entry: QueueEntry, now: float) -> tuple:
     return (entry.arrive_time, entry.lot.lot_id)
 
 
+def spt(entry: QueueEntry, now: float) -> tuple:
+    """Shortest processing time at this step first."""
+    return (entry.step.process_hours, entry.arrive_time, entry.lot.lot_id)
+
+
+def edd(entry: QueueEntry, now: float) -> tuple:
+    """Earliest due date first."""
+    return (entry.lot.due_time, entry.arrive_time, entry.lot.lot_id)
+
+
+def critical_ratio(entry: QueueEntry, now: float) -> tuple:
+    """CR = time until due / remaining raw process time. CR < 1 means the lot
+    cannot make its due date even with zero queueing; lowest CR first."""
+    cr = (entry.lot.due_time - now) / entry.step.remaining_hours
+    return (cr, entry.arrive_time, entry.lot.lot_id)
+
+
+def least_slack(entry: QueueEntry, now: float) -> tuple:
+    """Slack = time until due - remaining raw process time; least slack first."""
+    slack = entry.lot.due_time - now - entry.step.remaining_hours
+    return (slack, entry.arrive_time, entry.lot.lot_id)
+
+
 RULES: dict[str, PriorityFn] = {
     "FIFO": fifo,
-    # "SPT": ...,  "CR": ...,  "LEAST_SLACK": ...   <- week 2
+    "SPT": spt,
+    "EDD": edd,
+    "CR": critical_ratio,
+    "LEAST_SLACK": least_slack,
 }
 
 

@@ -6,6 +6,12 @@ Entities
   Tool       a SimPy process: pick lot(s) via the dispatch rule, process, repeat.
              A second process per tool injects random failures (exp. MTBF/MTTR)
              that interrupt processing; the job resumes after repair.
+  Release    planned orders arrive on a schedule; a release policy decides when
+             each enters the fab (open loop, CONWIP, or drum-buffer-rope).
+
+Random numbers use separate streams (per tool for failures, per lot for process
+times and scrap, one for order arrivals) so every policy sees the same
+failures and the same lots: "common random numbers" for paired comparisons.
 """
 from __future__ import annotations
 
@@ -27,6 +33,8 @@ class Lot:
     due_time: float
     wafers: int
     wafers_start: int
+    order_time: float = 0.0          # when the order was planned (before any release hold)
+    rng: np.random.Generator | None = field(default=None, repr=False)
     step_idx: int = 0
     complete_time: float | None = None
 
@@ -66,8 +74,15 @@ class Tool:
         self.up = True
         self.busy = False
         self.repair_done: simpy.Event | None = None
+        gi = list(fab.cfg.tool_groups).index(group.spec.name)
+        self.rng = np.random.default_rng([fab.seed, 1, gi, idx])   # failure stream
+        self.down_count = 0
+        self.down_at = 0.0
         self.proc = fab.env.process(self.run())
         fab.env.process(self.failures())
+        for inc in fab.cfg.raw.get("incidents", []):
+            if inc["tool"] == self.tool_id:
+                fab.env.process(self.incident(inc["start_day"] * 24.0, inc["end_day"] * 24.0))
 
     def run(self):
         env, fab, spec = self.fab.env, self.fab, self.group.spec
@@ -83,7 +98,9 @@ class Tool:
             start = env.now
             batch_id = next(fab.batch_ids)
             step = batch[0].step
-            remaining = fab.sample_process_time(step.process_hours)
+            remaining = fab.sample_process_time(step.process_hours, batch[0].lot.rng)
+            if spec.name == fab.drum:
+                fab.notify_release()      # drum pulled a lot from its buffer
 
             self.busy = True
             seg_start = env.now
@@ -104,20 +121,39 @@ class Tool:
                 fab.finish_step(e, self.tool_id, start, env.now, batch_id, len(batch))
             self.group.notify()       # let another idle tool re-check the queue
 
-    def failures(self):
-        env, spec, rng = self.fab.env, self.group.spec, self.fab.rng
-        while True:
-            yield env.timeout(rng.exponential(spec.mtbf))
+    # A tool is down while any reason (random failure, incident) holds it down.
+    def go_down(self) -> None:
+        self.down_count += 1
+        if self.down_count == 1:
             self.up = False
-            self.repair_done = env.event()
-            down_at = env.now
+            self.repair_done = self.fab.env.event()
+            self.down_at = self.fab.env.now
             if self.busy:
-                self.proc.interrupt("failure")
-            yield env.timeout(rng.exponential(spec.mttr))
+                self.proc.interrupt("down")
+
+    def go_up(self) -> None:
+        self.down_count -= 1
+        if self.down_count == 0:
             self.up = True
-            self.fab.record_state(self.tool_id, spec.name, "DOWN", down_at, env.now, None)
+            self.fab.record_state(self.tool_id, self.group.spec.name, "DOWN",
+                                  self.down_at, self.fab.env.now, None)
             self.repair_done.succeed()
             self.group.notify()
+
+    def failures(self):
+        env, spec, rng = self.fab.env, self.group.spec, self.rng
+        while True:
+            yield env.timeout(rng.exponential(spec.mtbf))
+            self.go_down()
+            yield env.timeout(rng.exponential(spec.mttr))
+            self.go_up()
+
+    def incident(self, start: float, end: float):
+        """Scheduled long outage (e.g. a major part failure awaiting a vendor)."""
+        yield self.fab.env.timeout(start)
+        self.go_down()
+        yield self.fab.env.timeout(end - start)
+        self.go_up()
 
 
 class Fab:
@@ -125,7 +161,19 @@ class Fab:
                  warmup_hours: float = 0.0, logger=None, snapshot_every: float = 4.0):
         self.cfg = cfg
         self.env = simpy.Environment()
-        self.rng = np.random.default_rng(seed)
+        self.seed = seed
+        self.order_rng = np.random.default_rng([seed, 2])
+        rel = cfg.release
+        self.release_policy = rel.get("policy", "constant")
+        self.drum = rel.get("drum", "LITHO") if self.release_policy == "dbr" else None
+        if self.drum:
+            self._first_drum_idx = next(st.index for st in cfg.route if st.tool_group == self.drum)
+        self.backlog: list[Lot] = []           # planned orders not yet released
+        self._release_signal: simpy.Event | None = None
+        self.qtime_moves = 0
+        self.qtime_violations = 0
+        self.release_wait_total = 0.0          # hours orders were held before release
+        self.released_after_warmup = 0
         self.rule_name = rule
         self.rule = RULES[rule]
         self.warmup = warmup_hours
@@ -140,16 +188,17 @@ class Fab:
         # time-weighted WIP (lots) after warm-up, for Little's Law
         self._wip_area = 0.0
         self._wip_last_t = 0.0
-        self.env.process(self.release())
+        self.env.process(self.order_arrivals())
+        self.env.process(self.release_gate())
         self.env.process(self.snapshots(snapshot_every))
 
     # ---- randomness -------------------------------------------------------
-    def sample_process_time(self, mean: float) -> float:
+    def sample_process_time(self, mean: float, rng: np.random.Generator) -> float:
         cv = self.cfg.process_time_cv
         if cv <= 0:
             return mean
         k = 1.0 / cv ** 2
-        return float(self.rng.gamma(k, mean / k))
+        return float(rng.gamma(k, mean / k))
 
     # ---- tool state accounting (post warm-up, in memory + DB) -------------
     def record_state(self, tool_id, group, state, start, end, batch_id) -> None:
@@ -169,25 +218,64 @@ class Fab:
         # caller mutates lots_in_fab right after
 
     # ---- lot flow ---------------------------------------------------------
-    def release(self):
+    def order_arrivals(self):
+        """Planned starts: constant or Poisson schedule. Due date is set from the
+        planned (order) time, so holding a lot back does not move its due date."""
         ia = self.cfg.release["interarrival_hours"]
+        arrivals = self.cfg.release.get("arrivals", "poisson" if self.release_policy == "poisson" else "constant")
         while True:
             now = self.env.now
-            lot = Lot(next(self.lot_ids), now,
-                      now + self.cfg.due_date_flow_factor * self.cfg.raw_process_time,
-                      self.cfg.wafers_per_lot, self.cfg.wafers_per_lot)
-            self._wip_change(+1)
-            self.lots_in_fab[lot.lot_id] = lot
-            self.wafers_started += lot.wafers
-            self.log.lot_release(lot)
-            self._send_to_step(lot)
-            policy = self.cfg.release["policy"]
-            if policy == "constant":
-                yield self.env.timeout(ia)
-            elif policy == "poisson":                    # exponential interarrivals
-                yield self.env.timeout(self.rng.exponential(ia))
-            else:
-                raise ValueError(f"Unknown release policy {policy!r} (week 2: conwip, dbr)")
+            lid = next(self.lot_ids)
+            lrng = np.random.default_rng([self.seed, 3, lid])
+            ff_range = self.cfg.raw.get("due_date_ff_range")
+            ff = lrng.uniform(*ff_range) if ff_range else self.cfg.due_date_flow_factor
+            lot = Lot(lid, now, now + ff * self.cfg.raw_process_time,
+                      self.cfg.wafers_per_lot, self.cfg.wafers_per_lot, order_time=now, rng=lrng)
+            self.backlog.append(lot)
+            self.notify_release()
+            yield self.env.timeout(ia if arrivals == "constant" else self.order_rng.exponential(ia))
+
+    def notify_release(self) -> None:
+        if self._release_signal is not None and not self._release_signal.triggered:
+            self._release_signal.succeed()
+
+    def can_release(self) -> bool:
+        p, rel = self.release_policy, self.cfg.release
+        if p in ("constant", "poisson"):
+            return True                                        # open loop / push
+        if p == "conwip":
+            return len(self.lots_in_fab) < int(rel["wip_cap"])  # constant WIP
+        if p == "dbr":
+            # Rope: the buffer is all work between release and the drum, i.e. lots
+            # queued at the drum + lots released but not yet at their first drum
+            # visit. Release only while that buffer is below target.
+            return self.drum_buffer() < int(rel["drum_buffer_lots"])
+        raise ValueError(f"Unknown release policy {p!r}")
+
+    def drum_buffer(self) -> int:
+        first = self._first_drum_idx
+        upstream = sum(1 for l in self.lots_in_fab.values() if l.step_idx < first)
+        return upstream + len(self.groups[self.drum].queue)
+
+    def release_gate(self):
+        while True:
+            while self.backlog and self.can_release():
+                lot = self.backlog.pop(0)
+                self._release(lot)
+            self._release_signal = self.env.event()
+            yield self._release_signal
+
+    def _release(self, lot: Lot) -> None:
+        now = self.env.now
+        lot.release_time = now
+        if now >= self.warmup:
+            self.release_wait_total += now - lot.order_time
+            self.released_after_warmup += 1
+        self._wip_change(+1)
+        self.lots_in_fab[lot.lot_id] = lot
+        self.wafers_started += lot.wafers
+        self.log.lot_release(lot)
+        self._send_to_step(lot)
 
     def _send_to_step(self, lot: Lot) -> None:
         step = self.cfg.route[lot.step_idx]
@@ -197,7 +285,11 @@ class Fab:
                     batch_id: int, batch_size: int) -> None:
         lot, step = e.lot, e.step
         rate = self.cfg.tool_groups[step.tool_group].scrap_rate
-        scrapped = int(self.rng.binomial(lot.wafers, rate)) if rate > 0 else 0
+        scrapped = int(lot.rng.binomial(lot.wafers, rate)) if rate > 0 else 0
+        if step.qtime_limit is not None and e.arrive_time >= self.warmup:
+            self.qtime_moves += 1
+            if start - e.arrive_time > step.qtime_limit:
+                self.qtime_violations += 1
         lot.wafers -= scrapped
         self.log.lot_move(lot.lot_id, step, tool_id, e.arrive_time, start, end,
                           batch_id, batch_size, lot.wafers + scrapped, lot.wafers)
@@ -208,6 +300,7 @@ class Fab:
             del self.lots_in_fab[lot.lot_id]
             self.completed.append(lot)
             self.log.lot_complete(lot)
+            self.notify_release()
         else:
             self._send_to_step(lot)
 

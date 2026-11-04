@@ -2,3 +2,4 @@ simpy>=4.1
 numpy>=1.26
 psycopg[binary]>=3.1   # only needed for PostgreSQL logging
 pytest>=8.0
+# Optional: charts for experiment reports ->  pip install matplotlib

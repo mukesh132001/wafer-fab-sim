@@ -29,8 +29,10 @@ def summarize(fab: Fab) -> dict:
     bottleneck = max(util, key=lambda g: util[g]["prod"])
     started_after_w = [l for l in done if l.release_time >= W]
 
+    lead = [l.complete_time - l.order_time for l in good]
     return {
         "dispatch_rule": fab.rule_name,
+        "release_policy": fab.release_policy,
         "window_hours": window,
         "lots_out": len(done),
         "wafers_out": int(sum(l.wafers for l in done)),
@@ -41,6 +43,12 @@ def summarize(fab: Fab) -> dict:
         "cycle_time_mean_days": round(float(np.mean(ct)) / 24, 2),
         "raw_process_time_h": round(rpt, 2),
         "x_factor": round(float(np.mean(ct)) / rpt, 2),
+        "cycle_time_std_h": round(float(np.std(ct)), 2),
+        "lead_time_mean_h": round(float(np.mean(lead)), 2) if lead else None,
+        "release_wait_mean_h": round(fab.release_wait_total / max(1, fab.released_after_warmup), 2),
+        "backlog_at_end": len(fab.backlog),
+        "qtime_moves": fab.qtime_moves,
+        "qtime_violation_pct": round(100 * fab.qtime_violations / fab.qtime_moves, 2) if fab.qtime_moves else None,
         "on_time_pct": round(100 * np.mean([l.complete_time <= l.due_time for l in good]), 1) if good else None,
         "line_yield": round(sum(l.wafers for l in started_after_w) /
                             max(1, sum(l.wafers_start for l in started_after_w)), 4),
@@ -58,12 +66,17 @@ def summarize(fab: Fab) -> dict:
 
 def print_summary(s: dict) -> None:
     ll = s["littles_law"]
-    print(f"\n=== {s['dispatch_rule']} | {s['window_hours']/24:.0f} days measured ===")
+    print(f"\n=== {s['dispatch_rule']} + {s['release_policy']} release | {s['window_hours']/24:.0f} days measured ===")
     print(f"Throughput     : {s['throughput_wafers_per_day']} wafers/day ({s['throughput_lots_per_day']} lots/day)")
     print(f"Cycle time     : mean {s['cycle_time_mean_h']} h ({s['cycle_time_mean_days']} d), "
           f"p90 {s['cycle_time_p90_h']} h, x-factor {s['x_factor']}")
     print(f"Avg WIP        : {s['avg_wip_lots']} lots   On-time: {s['on_time_pct']}%   "
           f"Line yield: {s['line_yield']:.2%}")
+    if s["qtime_violation_pct"] is not None:
+        print(f"Q-time viol.   : {s['qtime_violation_pct']}% of {s['qtime_moves']} time-constrained moves")
+    if s["release_policy"] in ("conwip", "dbr"):
+        print(f"Release hold   : mean {s['release_wait_mean_h']} h before entering fab; "
+              f"lead time (order->out) {s['lead_time_mean_h']} h; backlog at end {s['backlog_at_end']}")
     print(f"Little's Law   : WIP {ll['wip_observed']} vs TH x CT {ll['wip_predicted_TH_x_CT']} "
           f"({ll['rel_error_pct']:+.2f}%)")
     print("Utilization    : " + "  ".join(

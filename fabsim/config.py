@@ -35,6 +35,8 @@ class Step:
     tool_group: str
     process_hours: float           # per lot, or per batch for batch tools
     recipe: str
+    remaining_hours: float = 0.0   # raw process time from this step (incl.) to route end
+    qtime_limit: float | None = None   # max allowed queue time at this step (h), if any
 
 
 @dataclass
@@ -46,6 +48,7 @@ class FabConfig:
     release: dict
     tool_groups: dict[str, ToolGroupSpec]
     route: list[Step]
+    qtime_limits: dict[str, float] = field(default_factory=dict)
     raw: dict = field(repr=False, default_factory=dict)
 
     @property
@@ -54,28 +57,53 @@ class FabConfig:
         return sum(s.process_hours for s in self.route)
 
     def with_overrides(self, tool_counts: dict[str, int] | None = None,
-                       interarrival_hours: float | None = None) -> "FabConfig":
-        """Return a modified copy - used for what-if scenarios."""
+                       interarrival_hours: float | None = None,
+                       release: dict | None = None,
+                       group_params: dict[str, dict] | None = None,
+                       incidents: list[dict] | None = None) -> "FabConfig":
+        """Return a modified copy - used for what-if scenarios.
+
+        tool_counts   {"LITHO": 2}                  change number of tools
+        release       {"policy": "dbr", "drum_buffer_lots": 6}
+        group_params  {"LITHO": {"mttr": 12}}       change any tool-group field
+        incidents     [{"tool": "LITHO_02", "start_day": 80, "end_day": 94}]
+        """
         raw = copy.deepcopy(self.raw)
-        if tool_counts:
-            for tg in raw["tool_groups"]:
-                if tg["name"] in tool_counts:
-                    tg["tools"] = int(tool_counts[tg["name"]])
+        names = {tg["name"] for tg in raw["tool_groups"]}
+        for name in list(tool_counts or {}) + list(group_params or {}):
+            if name not in names:
+                raise ValueError(f"Unknown tool group {name!r}; choose from {sorted(names)}")
+        for tg in raw["tool_groups"]:
+            if tool_counts and tg["name"] in tool_counts:
+                tg["tools"] = int(tool_counts[tg["name"]])
+            if group_params and tg["name"] in group_params:
+                tg.update(group_params[tg["name"]])
         if interarrival_hours is not None:
             raw["release"]["interarrival_hours"] = float(interarrival_hours)
+        if release:
+            raw["release"].update(release)
+        if incidents is not None:
+            raw["incidents"] = list(incidents)
         return parse_config(raw)
 
 
 def parse_config(raw: dict) -> FabConfig:
     groups = {g["name"]: ToolGroupSpec(**g) for g in raw["tool_groups"]}
-    steps: list[Step] = []
+    steps: list[tuple] = []
     for block in raw["route"]:
         module = raw["modules"][block["module"]]
         for _ in range(block.get("repeat", 1)):
             for group, hours, recipe in module:
                 if group not in groups:
                     raise ValueError(f"Route uses unknown tool group {group!r}")
-                steps.append(Step(len(steps), group, float(hours), recipe))
+                steps.append((group, float(hours), recipe))
+    qlim = {k: float(v) for k, v in raw.get("qtime_limits", {}).items()}
+    route, remaining = [], 0.0
+    for i in range(len(steps) - 1, -1, -1):
+        group, hours, recipe = steps[i]
+        remaining += hours
+        route.append(Step(i, group, hours, recipe, remaining, qlim.get(recipe)))
+    steps = route[::-1]
     return FabConfig(
         fab_name=raw["fab_name"],
         wafers_per_lot=int(raw["wafers_per_lot"]),
@@ -84,6 +112,7 @@ def parse_config(raw: dict) -> FabConfig:
         release=dict(raw["release"]),
         tool_groups=groups,
         route=steps,
+        qtime_limits=qlim,
         raw=raw,
     )
 

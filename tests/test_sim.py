@@ -26,8 +26,8 @@ def test_route_is_reentrant(cfg):
 def test_lot_conservation_and_littles_law(cfg):
     fab = Fab(cfg, seed=7, warmup_hours=30 * 24)
     fab.run(150 * 24)
-    released = next(fab.lot_ids) - 1
-    assert released == len(fab.completed) + len(fab.lots_in_fab)
+    ordered = next(fab.lot_ids) - 1
+    assert ordered == len(fab.completed) + len(fab.lots_in_fab) + len(fab.backlog)
     from fabsim.metrics import summarize
     s = summarize(fab)
     assert abs(s["littles_law"]["rel_error_pct"]) < 3.0
